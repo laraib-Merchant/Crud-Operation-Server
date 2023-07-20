@@ -1,10 +1,12 @@
 import express from "express";
+import cors from 'cors';
 import { customAlphabet } from 'nanoid'
 const nanoid = customAlphabet('1234567890', 20)
 
 
 const app = express();
 app.use(express.json());
+app.use(cors());
 
 app.get("/", (req, res) => {
   res.send("hello world!");
