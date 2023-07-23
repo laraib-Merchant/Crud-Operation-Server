@@ -1,12 +1,32 @@
 import express from "express";
+import { MongoClient } from "mongodb";
 import cors from 'cors';
-import { customAlphabet } from 'nanoid'
-const nanoid = customAlphabet('1234567890', 20)
-
+import { customAlphabet } from 'nanoid';
+const nanoid = customAlphabet('1234567890', 20);
+import './config/index.mjs';
 
 const app = express();
 app.use(express.json());
 app.use(cors());
+
+
+async function connect() {
+  try {
+    
+    const uri = `mongodb+srv://${process.env.DB_USERNAME}:${process.env.DB_PASSWORD}@cluster0.yqozuhy.mongodb.net/?retryWrites=true&w=majority`;
+    const client = new MongoClient(uri);
+    await client.connect();
+    console.log("Conneted successfully");
+    const dbName = "ecom";
+    const dbCollection = "products";
+    const db = client.db(dbName);
+    const col = db.collection(dbCollection);
+    return col;
+  } catch(error) {
+    console.log(`Error Occured: ${error}`);
+  }
+}
+
 
 app.get("/", (req, res) => {
   res.send("hello world!");
@@ -14,16 +34,20 @@ app.get("/", (req, res) => {
 
 
 
-let products = [
-  {
-    id: nanoid(), // always a number
-    name: "abc product",
-    price: "$23.12",
-    description: "abc product description"
-  }
-];
+// let products = [
+//   {
+//     id: nanoid(), // always a number
+//     name: "abc product",
+//     price: "$23.12",
+//     description: "abc product description"
+//   }
+// ];
 
-app.get("/products", (req, res) => {
+app.get("/products", async (req, res) => {
+
+  const dbcol = await connect();
+  const cursor = await dbcol.find({}); // An empty filter to retrieve all documents
+  const products = await cursor.toArray(); // Convert the cursor to an array of documents
   res.send({
     message: "all products",
     data: products
@@ -31,7 +55,7 @@ app.get("/products", (req, res) => {
 });
 
 //  https://baseurl.com/product/1231
-app.get("/product/:id", (req, res) => {
+app.get("/product/:id", async (req, res) => {
   console.log(typeof req.params.id)
 
   if (isNaN(req.params.id)) {
@@ -39,13 +63,17 @@ app.get("/product/:id", (req, res) => {
   }
 
   let isFound = false;
-
-  for (let i = 0; i < products.length; i++) {
-    if (products[i].id === req.params.id) {
-      isFound = i;
-      break;
-    }
+  const dbcol = await connect();
+  const cursor =  await dbcol.findOne({ id: req.params.id });
+  if(cursor) {
+    isFound = true;
   }
+  // for (let i = 0; i < products.length; i++) {
+  //   if (products[i].id === req.params.id) {
+  //     isFound = i;
+  //     break;
+  //   }
+  // }
 
   if (isFound === false) {
     res.status(404);
@@ -54,13 +82,13 @@ app.get("/product/:id", (req, res) => {
     });
   } else {
     res.send({
-      message: "product found with id: " + products[isFound].id,
-      data: products[isFound]
+      message: "product found with id: " + req.params.id,
+      data: cursor
     });
   }
 });
 
-app.post("/product", (req, res) => {
+app.post("/product", async (req, res) => {
 
   // {
   //   id: 212342, // always a number
@@ -82,19 +110,27 @@ app.post("/product", (req, res) => {
         description: "abc product description"
       }`);
   }
-
-  products.push({
+  const productDocument = {
     id: nanoid(),
     name: req.body.name,
     price: req.body.price,
     description: req.body.description,
-  });
+  };
+  const dbcol = await connect();
+  const result = await dbcol.insertOne(productDocument);
+
+  // products.push({
+  //   id: nanoid(),
+  //   name: req.body.name,
+  //   price: req.body.price,
+  //   description: req.body.description,
+  // });
 
 
   res.status(201).send({ message: "created product" });
 });
 
-app.put("/product/:id", (req, res) => {
+app.put("/product/:id", async (req, res) => {
 
   if (
     !req.body.name
@@ -115,12 +151,26 @@ app.put("/product/:id", (req, res) => {
 
   let isFound = false;
 
-  for (let i = 0; i < products.length; i++) {
-    if (products[i].id === req.params.id) {
-      isFound = i;
-      break;
-    }
+  const dbcol = await connect();
+  const filter = {id: req.params.id};
+  const update = {
+    $set: {
+      name: req.body.name,
+      price: req.body.price,
+      description: req.body.description
+    }};
+  const options = { returnDocument: 'after'};
+  //const result = await dbcol.updateOne(filter, update);
+  const updatedProduct = await dbcol.findOneAndUpdate(filter,update,options);
+  if(updatedProduct) {
+    isFound = true;
   }
+  // for (let i = 0; i < products.length; i++) {
+  //   if (products[i].id === req.params.id) {
+  //     isFound = i;
+  //     break;
+  //   }
+  // }
 
   if (isFound === false) {
     res.status(404);
@@ -129,27 +179,33 @@ app.put("/product/:id", (req, res) => {
     });
   } else {
 
-    if (req.body.name) products[isFound].name = req.body.name
-    if (req.body.price) products[isFound].price = req.body.price
-    if (req.body.description) products[isFound].description = req.body.description
+    // if (req.body.name) products[isFound].name = req.body.name
+    // if (req.body.price) products[isFound].price = req.body.price
+    // if (req.body.description) products[isFound].description = req.body.description
 
     res.send({
-      message: "product is updated with id: " + products[isFound].id,
-      data: products[isFound]
+      message: "product is updated with id: " + req.params.id,
+      data: updatedProduct
     });
   }
 });
 
-app.delete("/product/:id", (req, res) => {
+app.delete("/product/:id", async (req, res) => {
 
   let isFound = false;
 
-  for (let i = 0; i < products.length; i++) {
-    if (products[i].id === req.params.id) {
-      isFound = i;
-      break;
-    }
+  const dbcol = await connect();
+  const filter = {id: req.params.id};
+  const result = await dbcol.deleteOne(filter);
+  if(result.deletedCount > 0) {
+    isFound = true;
   }
+  // for (let i = 0; i < products.length; i++) {
+  //   if (products[i].id === req.params.id) {
+  //     isFound = i;
+  //     break;
+  //   }
+  // }
 
   if (isFound === false) {
     res.status(404);
@@ -157,7 +213,7 @@ app.delete("/product/:id", (req, res) => {
       message: "product not found"
     });
   } else {
-    products.splice(isFound, 1)
+    //products.splice(isFound, 1)
 
     res.send({
       message: "product is deleted"
